@@ -1,3 +1,4 @@
+require ('dotenv').config();
 const bitcoin = require('bitcoinjs-lib')
 const ecc = require('tiny-secp256k1');
 const ecpair = require('ecpair');
@@ -9,8 +10,8 @@ let bob = JSON.parse(process.env.BOB);
 const network = bitcoin.networks.bitcoin
 const p2ms = bitcoin.payments.p2ms({
     m: 1, pubkeys: [
-        Buffer.from(alice.publicKey, 'hex'),
         Buffer.from(bob.publicKey, 'hex'),
+        Buffer.from(alice.publicKey, 'hex'),
     ], network
 })
 
@@ -23,19 +24,27 @@ console.log(p2sh.address)
 
 let psbt = new bitcoin.Psbt({network})
     .addInput({
-        hash: '1b5d38d3ac3e507b3c79450472139587caa19d83bd4059ba3107ec4c790b0e70',
-        index: 1,
+        hash: '1bfc082ad6a6e55ae6a6cf5422c8ce398db20468140aa49583fe06800686a10b',
+        index: 0    ,
         redeemScript: p2sh.redeem.output,
-        nonWitnessUtxo:  Buffer.from('0100000001b6168448565c9576677e71e26e5778afc659d75e63943281352327e97eb088bd010000009200483045022100c11e193a3c67f0bc90e036ee65899fc0e401c8b8b1c5a9a4971338d55c8a52e3022055d7799f5113787378e3ffc3561d0d4a3f842276b4b7e640510af9473740da7d014751210258c35b46772c2050d480e93350f19d418e2d6d5279aa89b8a601cd7017b8ea2721030c49fc69bef08c9d0e38c6b6510cbe715f9542c4ed906c738b54bd1fa1e5284552aeffffffff02742700000000000017a914cc6f8e771ee6b52febae535c45b7135eddc4c5ce872fd500000000000017a9142bb4999cad6a41f3ec93cc704740be9379678f7a8700000000', 'hex')
+        nonWitnessUtxo:  Buffer.from('0200000000010105bb1d5d9f03eaf4b33bb87b3308b0906c957406d99ada61a9029bd761b21f9c01000000171600144150416df8be84a37567e4d9cd5de9868dfb8987feffffff02881300000000000017a914bdacf437b2db789c79dc00b9a674ebb2b187a7ef872a3800000000000017a914f00e6b1ae96bb7cdf0d98dd6c3853bf9049511838702483045022100a7348339c4917d36960b468913412bb401e66c8cd622d47353f485df57fc9583022070b2bc1ce5e2ae2513cda9bb0f45e49ea38d96afcd3d8e163e33e0a110847a2b01210392c629c4c6bc8ed476088697e1ead5ec2df64d9c031b0de32b1befd7b4f231c5595a0c00', 'hex')
+
+    })
+    .addInput({
+        hash: '9c1fb261d79b02a961da9ad90674956c90b008337bb83bb3f4ea039f5d1dbb05',
+        index: 0    ,
+        redeemScript: p2sh.redeem.output,
+        nonWitnessUtxo:  Buffer.from('020000000001019c23e491df409d87ee62363f52dac651edc3300e5d20bc75f68765c9031c59df0000000017160014bcb8cfd51c05d7ff4b85282d31a68b255ab62f73feffffff02204e00000000000017a914bdacf437b2db789c79dc00b9a674ebb2b187a7ef87205400000000000017a914cf5540467d550fc6809d11ae420231fe291011978702483045022100d666199837455745cc468f7c5595f1fb8f33a0b95f84e3e0255008f636a3af1002201d3140bde9352aef9de28dba8c2c9bfe6f6f7c351cb7565bfd219bebfa1d242d0121034fafd2d725ffc1c49c719f684caf51b61837878f55dfb2b5e9be3bc8ede8376772570c00', 'hex')
 
     })
     .addOutput({
         address: "36b5Z19fLrbgEcV1dwhwiFjix86bGweXKC",
-        value: 100,
+        value: 19000,
     })
 
 const keyPairAlice1 = ecpairFactory.fromPrivateKey(Buffer.from(alice.privateKey, 'hex'))
 psbt.signInput(0, keyPairAlice1)
+psbt.signInput(1, keyPairAlice1)
 
 psbt.finalizeAllInputs()
 console.log('Transaction hexadecimal:')
