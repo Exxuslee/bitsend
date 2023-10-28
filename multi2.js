@@ -1,8 +1,8 @@
-const bitcoin = require('./bitcoinjs-lib-master/src')
+require ('dotenv').config();
+const bitcoin = require('bitcoinjs-lib')
 const ecc = require('tiny-secp256k1');
 const ecpair = require('ecpair');
 const ecpairFactory = ecpair.ECPairFactory(ecc);
-require ('dotenv').config();
 
 let alice = JSON.parse(process.env.ALICE);
 let claus = JSON.parse(process.env.CLAUS);
