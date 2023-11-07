@@ -14,20 +14,50 @@ const client = new Client({
     port: 8332
 })
 
+let myItems = []
+let rivalItems = []
+let targetItems = []
+
+
 async function read_data() {
     let getBlockTemplate = await client.getBlockTemplate({"rules": ["segwit"]})
     let transactions = getBlockTemplate.transactions
-
+    console.log("transactions:", transactions.length)
     for (const transaction of transactions) {
         //console.log(transaction)
-        let decode = await client.decodeRawTransaction(transaction.data)
-        for (const vout of decode.vout) {
-            // console.log(decode.vout[index].scriptPubKey.addresses)
-            if (vout.scriptPubKey.addresses !== undefined) {
-                let found = equals(vout.scriptPubKey.addresses[0])
-                if (found) create(transaction, found, vout)
+        try {
+            let decode = await client.decodeRawTransaction(transaction.data)
+            console.log(decode)
+            for (const vout of decode.vout) {
+                //console.log(vout.scriptPubKey.addresses)
+                if (vout.scriptPubKey.addresses !== undefined) {
+                    let foundAddr = equals(vout.scriptPubKey.addresses[0])
+                    if (foundAddr) targetItems.push({transaction: transaction, foundAddr: foundAddr, vout: vout})
+                }
             }
+            for (const vin of decode.vin) {
+                console.log(vin)
+                // if (vout.scriptPubKey.addresses !== undefined) {
+                //     let foundAddr = equals(vout.scriptPubKey.addresses[0])
+                //     if (foundAddr) found.push({transaction: transaction, foundAddr: foundAddr, vout: vout})
+                // }
+            }
+        } catch (e) {
+            console.log(e)
         }
+    }
+    if (targetItems.length > 0) {
+        let blockchainInfo = await client.getBlockchainInfo()
+        let blockStats = await client.getBlockStats(blockchainInfo.blocks)
+
+
+        for (const item of targetItems) {
+            item.minfeerate = blockStats.minfeerate
+            createFirst(item)
+        }
+    } else {
+        myItems = []
+        rivalItems = []
     }
 }
 
@@ -36,24 +66,49 @@ function equals(address) {
     return false
 }
 
-function create(transaction, found, vout) {
-    console.log(vout)
-    console.log(found)
+function createFirst(item) {
+    console.log(item.transaction)
+    console.log(item.vout)
+    console.log(item.foundAddr)
+    console.log(item.minfeerate)
     const network = bitcoin.networks.bitcoin
-    const keyPair = ecpairFactory.fromPrivateKey(Buffer.from(found.privateKey, 'hex'), {compressed: found.compressed})
-    const psbt = new bitcoin.Psbt({network})
+    const keyPair = ecpairFactory.fromPrivateKey(
+        Buffer.from(item.foundAddr.privateKey, 'hex'), {compressed: item.foundAddr.compressed}
+    )
+
+    let fee = new bitcoin.Psbt({network})
         .addInput({
-            hash: transaction.txid,
-            index: vout.n,
-            nonWitnessUtxo: Buffer.from(transaction.data, 'hex')
+            hash: item.transaction.txid,
+            index: item.vout.n,
+            nonWitnessUtxo: Buffer.from(item.transaction.data, 'hex')
         })
         .addOutput({
-            address: "36b5Z19fLrbgEcV1dwhwiFjix86bGweXKC",
-            value: vout.value * 100000000
+            address: "36b5Z19fLrbgEcV1dwhwiFjix86bGweXKC", value: Math.floor(item.vout.value * 100000000)
         })
-    psbt.signInput(0, keyPair)
-    psbt.finalizeAllInputs()
-    console.log(psbt.extractTransaction().toHex())
+    try {
+        fee.signInput(0, keyPair)
+        fee.finalizeAllInputs()
+        let length = fee.extractTransaction().toHex().length
+        let sendAmount = Math.floor(item.vout.value * 100000000 - length * item.minfeerate)
+        let psbt = new bitcoin.Psbt({network})
+            .addInput({
+                hash: item.transaction.txid,
+                index: item.vout.n,
+                nonWitnessUtxo: Buffer.from(item.transaction.data, 'hex')
+            })
+            .addOutput({
+                address: "36b5Z19fLrbgEcV1dwhwiFjix86bGweXKC",
+                value: sendAmount
+            })
+        psbt.signInput(0, keyPair)
+        psbt.finalizeAllInputs()
+        myItems.push({address: item.foundAddr.publicKey, amount: sendAmount})
+        console.log(psbt.extractTransaction().toHex())
+
+    } catch (e) {
+        console.log(e)
+    }
+
 }
 
 

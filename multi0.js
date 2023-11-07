@@ -42,10 +42,16 @@ let psbt = new bitcoin.Psbt({network})
         value: 19000,
     })
 
+
 const keyPairAlice1 = ecpairFactory.fromPrivateKey(Buffer.from(alice.privateKey, 'hex'))
 psbt.signInput(0, keyPairAlice1)
 psbt.signInput(1, keyPairAlice1)
-
 psbt.finalizeAllInputs()
-console.log('Transaction hexadecimal:')
-console.log(psbt.extractTransaction().toHex())
+
+console.log("fee:\t",psbt.getFee())
+console.log("feeRate:",psbt.getFeeRate())
+console.log('Transaction hexadecimal:', psbt.extractTransaction().toHex().length, psbt.extractTransaction().toHex())
+
+
+// let asd =  bitcoin.Transaction.fromHex(psbt.extractTransaction().toHex())
+// console.log(asd.getId())
