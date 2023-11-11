@@ -19,6 +19,35 @@ const network = bitcoin.networks.bitcoin
 let myItems = []
 let rivalItems = []
 let targetItems = new Set([])
+let privateConfig = {}
+
+bitcoin.initEccLib(ecc)
+function generateConfig() {
+    for (const conf of config) {
+        const keyPairC = ecpairFactory.fromPrivateKey(Buffer.from(conf.privateKey, 'hex'), {compressed: true})
+        const keyPairU = ecpairFactory.fromPrivateKey(Buffer.from(conf.privateKey, 'hex'), {compressed: false})
+
+        const p2pkhc = bitcoin.payments.p2pkh({pubkey:  keyPairC.publicKey, network: network,})
+        console.log('p2pkh\t', p2pkhc.address)
+
+        const p2pkhu = bitcoin.payments.p2pkh({pubkey:  keyPairU.publicKey, network: network,})
+        console.log('p2pkh\t', p2pkhu.address)
+
+        const p2msC = bitcoin.payments.p2ms({m: 1, pubkeys: [keyPairC.publicKey], network})
+        const p2shC = bitcoin.payments.p2sh({redeem: p2msC, network})
+        console.log('p2sh\t', p2shC.address)
+
+        const p2msU = bitcoin.payments.p2ms({m: 1, pubkeys: [keyPairU.publicKey], network})
+        const p2shU = bitcoin.payments.p2sh({redeem: p2msU, network})
+        console.log('p2sh\t', p2shU.address)
+
+        const p2wpkh = bitcoin.payments.p2wpkh({pubkey: keyPairC.publicKey, network: network,})
+        console.log('p2wpkh\t', p2wpkh.address)
+
+        const p2tr = bitcoin.payments.p2tr({internalPubkey:  keyPairC.publicKey.slice(1, 33), network: network,})
+        console.log('p2tr\t', p2tr.address)
+    }
+}
 
 
 async function read() {
@@ -69,7 +98,8 @@ async function read() {
 }
 
 function equals(address) {
-    const keyPair = ecpairFactory.fromPrivateKey(Buffer.from(conf.privateKey, 'hex'))
+    const keyPairCompressed = ecpairFactory.fromPrivateKey(Buffer.from(conf.privateKey, 'hex'), {compressed: true})
+    const keyPairUncompressed = ecpairFactory.fromPrivateKey(Buffer.from(conf.privateKey, 'hex'), {compressed: false})
 
     const p2wpkh = bitcoin.payments.p2wpkh({
         pubkey: keyPair.publicKey,
@@ -133,6 +163,8 @@ function createFirst(item) {
 
 }
 
+
+generateConfig()
 read().then(r => console.log(r))
 
 
