@@ -19,34 +19,27 @@ const network = bitcoin.networks.bitcoin
 let myItems = []
 let rivalItems = []
 let targetItems = new Set([])
-let privateConfig = {}
+let privateConfig = []
 
 bitcoin.initEccLib(ecc)
 function generateConfig() {
     for (const conf of config) {
-        const keyPairC = ecpairFactory.fromPrivateKey(Buffer.from(conf.privateKey, 'hex'), {compressed: true})
-        const keyPairU = ecpairFactory.fromPrivateKey(Buffer.from(conf.privateKey, 'hex'), {compressed: false})
+        const keyPairC = ecpairFactory.fromPrivateKey(Buffer.from(conf, 'hex'), {compressed: true})
+        const keyPairU = ecpairFactory.fromPrivateKey(Buffer.from(conf, 'hex'), {compressed: false})
 
-        const p2pkhc = bitcoin.payments.p2pkh({pubkey:  keyPairC.publicKey, network: network,})
-        console.log('p2pkh\t', p2pkhc.address)
+        const p2pkhC = bitcoin.payments.p2pkh({pubkey:  keyPairC.publicKey, network: network,})
+        privateConfig.push({privateKey: conf, address: p2pkhC.address, script: "p2pkhC"})
 
-        const p2pkhu = bitcoin.payments.p2pkh({pubkey:  keyPairU.publicKey, network: network,})
-        console.log('p2pkh\t', p2pkhu.address)
-
-        const p2msC = bitcoin.payments.p2ms({m: 1, pubkeys: [keyPairC.publicKey], network})
-        const p2shC = bitcoin.payments.p2sh({redeem: p2msC, network})
-        console.log('p2sh\t', p2shC.address)
-
-        const p2msU = bitcoin.payments.p2ms({m: 1, pubkeys: [keyPairU.publicKey], network})
-        const p2shU = bitcoin.payments.p2sh({redeem: p2msU, network})
-        console.log('p2sh\t', p2shU.address)
+        const p2pkhU = bitcoin.payments.p2pkh({pubkey:  keyPairU.publicKey, network: network,})
+        privateConfig.push({privateKey: conf, address: p2pkhU.address, script: "p2pkhU"})
 
         const p2wpkh = bitcoin.payments.p2wpkh({pubkey: keyPairC.publicKey, network: network,})
-        console.log('p2wpkh\t', p2wpkh.address)
+        privateConfig.push({privateKey: conf, address: p2wpkh.address, script: "p2wpkh"})
 
         const p2tr = bitcoin.payments.p2tr({internalPubkey:  keyPairC.publicKey.slice(1, 33), network: network,})
-        console.log('p2tr\t', p2tr.address)
+        privateConfig.push({privateKey: conf, address: p2tr.address, script: "p2tr"})
     }
+    console.log("PrivateConfig:", privateConfig.length)
 }
 
 
@@ -67,8 +60,8 @@ async function read() {
                     for (const vout of decode.vout) {
                         //console.log(vout.scriptPubKey.addresses)
                         if (vout.scriptPubKey.addresses !== undefined) {
-                            let foundAddr = equals(vout.scriptPubKey.addresses[0])
-                            if (foundAddr) targetItems.add({transaction: transaction, foundAddr: foundAddr, vout: vout})
+                            let foundConfig = equals(vout.scriptPubKey.addresses[0])
+                            if (foundConfig) targetItems.add({transaction: transaction, foundConfig: foundConfig, vout: vout})
                         }
                     }
                     for (const vin of decode.vin) {
@@ -98,34 +91,18 @@ async function read() {
 }
 
 function equals(address) {
-    const keyPairCompressed = ecpairFactory.fromPrivateKey(Buffer.from(conf.privateKey, 'hex'), {compressed: true})
-    const keyPairUncompressed = ecpairFactory.fromPrivateKey(Buffer.from(conf.privateKey, 'hex'), {compressed: false})
-
-    const p2wpkh = bitcoin.payments.p2wpkh({
-        pubkey: keyPair.publicKey,
-        network: network,
-    })
-    const p2pkh = bitcoin.payments.p2pkh({
-        pubkey: keyPair.publicKey,
-        network: network,
-    })
-
-
-
-
-
-    for (const conf of config) if (conf.addr === address) return conf
+    for (const conf of privateConfig) if (conf.address === address) return conf
     return false
 }
 
 function createFirst(item) {
     console.log(item.transaction)
     console.log(item.vout)
-    console.log(item.foundAddr)
+    console.log(item.foundConfig)
     console.log(item.minfeerate)
-    const network = bitcoin.networks.bitcoin
+
     const keyPair = ecpairFactory.fromPrivateKey(
-        Buffer.from(item.foundAddr.privateKey, 'hex'), {compressed: item.foundAddr.compressed}
+        Buffer.from(item.foundConfig.privateKey, 'hex'), {compressed: item.foundConfig.compressed}
     )
 
     let fee = new bitcoin.Psbt({network})
