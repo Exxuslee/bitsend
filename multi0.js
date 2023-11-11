@@ -9,7 +9,8 @@ let bob = JSON.parse(process.env.BOB);
 
 const network = bitcoin.networks.bitcoin
 const p2ms = bitcoin.payments.p2ms({
-    m: 1, pubkeys: [
+    m: 1,
+    pubkeys: [
         Buffer.from(bob.publicKey, 'hex'),
         Buffer.from(alice.publicKey, 'hex'),
     ], network

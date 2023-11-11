@@ -4,17 +4,48 @@ const ecc = require('tiny-secp256k1');
 const ecpair = require('ecpair');
 const ecpairFactory = ecpair.ECPairFactory(ecc);
 
-let alice = JSON.parse(process.env.PUZZLE_65);
+bitcoin.initEccLib(ecc)
+
+let alice1 = JSON.parse(process.env.PUZZLE_02);
+let alice2 = JSON.parse(process.env.PUZZLE_02);
+let alice3 = JSON.parse(process.env.PUZZLE_03);
 
 const network = bitcoin.networks.bitcoin
-const keyPairAlice1 = ecpairFactory.fromPrivateKey(Buffer.from(alice.privateKey, 'hex'))
+const keyPairAlice1 = ecpairFactory.fromPrivateKey(Buffer.from(alice1.privateKey, 'hex'))
+const keyPairAlice2 = ecpairFactory.fromPrivateKey(Buffer.from(alice2.privateKey, 'hex'))
+const keyPairAlice3 = ecpairFactory.fromPrivateKey(Buffer.from(alice3.privateKey, 'hex'))
 
-const account = bitcoin.payments.p2pkh({
+const p2pkh = bitcoin.payments.p2pkh({
+    pubkey:  keyPairAlice1.publicKey,
+    network: network,
+})
+console.log('p2pkh\t', p2pkh.address)
+
+const p2ms = bitcoin.payments.p2ms({
+    m: 2,
+    pubkeys: [keyPairAlice1.publicKey, keyPairAlice2.publicKey, keyPairAlice3.publicKey],
+    network
+})
+
+const p2sh = bitcoin.payments.p2sh({redeem: p2ms, network})
+console.log('p2sh\t', p2sh.address)
+
+const p2wpkh = bitcoin.payments.p2wpkh({
     pubkey: keyPairAlice1.publicKey,
     network: network,
 })
-console.log('P2PKH address')
-console.log(account.address)
+console.log('p2wpkh\t', p2wpkh.address)
+
+const p2tr = bitcoin.payments.p2tr({
+    internalPubkey:  keyPairAlice1.publicKey.slice(1, 33),
+    network: network,
+})
+console.log('p2tr\t', p2tr.address)
+
+
+
+
+
 
 
 const psbt = new bitcoin.Psbt({network})

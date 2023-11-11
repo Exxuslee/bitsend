@@ -14,6 +14,7 @@ const client = new Client({
     password: process.env.passw,
     port: 8332
 })
+const network = bitcoin.networks.bitcoin
 
 let myItems = []
 let rivalItems = []
@@ -30,23 +31,25 @@ async function read() {
 
             for (const txMempool of txsMempool) {
                 //console.log(transaction)
-                let rawTx = await client.getRawTransaction(txMempool)
-                let decode = await client.decodeRawTransaction(rawTx)
-                // console.log(decode)
-                for (const vout of decode.vout) {
-                    //console.log(vout.scriptPubKey.addresses)
-                    if (vout.scriptPubKey.addresses !== undefined) {
-                        let foundAddr = equals(vout.scriptPubKey.addresses[0])
-                        if (foundAddr) targetItems.add({transaction: transaction, foundAddr: foundAddr, vout: vout})
+                try {
+                    let rawTx = await client.getRawTransaction(txMempool)
+                    let decode = await client.decodeRawTransaction(rawTx)
+                    // console.log(decode)
+                    for (const vout of decode.vout) {
+                        //console.log(vout.scriptPubKey.addresses)
+                        if (vout.scriptPubKey.addresses !== undefined) {
+                            let foundAddr = equals(vout.scriptPubKey.addresses[0])
+                            if (foundAddr) targetItems.add({transaction: transaction, foundAddr: foundAddr, vout: vout})
+                        }
                     }
-                }
-                for (const vin of decode.vin) {
-                    //console.log(vin)
-                    // if (vout.scriptPubKey.addresses !== undefined) {
-                    //     let foundAddr = equals(vout.scriptPubKey.addresses[0])
-                    //     if (foundAddr) found.push({transaction: transaction, foundAddr: foundAddr, vout: vout})
-                    // }
-                }
+                    for (const vin of decode.vin) {
+                        //console.log(vin)
+                        // if (vout.scriptPubKey.addresses !== undefined) {
+                        //     let foundAddr = equals(vout.scriptPubKey.addresses[0])
+                        //     if (foundAddr) found.push({transaction: transaction, foundAddr: foundAddr, vout: vout})
+                        // }
+                    }
+                } catch (e) {}
 
             }
             if (targetItems.length > 0) {
@@ -60,12 +63,27 @@ async function read() {
                 rivalItems = []
             }
         } catch (e) {
-            console.log(e.error)
+            console.log(1, e)
         }
     }
 }
 
 function equals(address) {
+    const keyPair = ecpairFactory.fromPrivateKey(Buffer.from(conf.privateKey, 'hex'))
+
+    const p2wpkh = bitcoin.payments.p2wpkh({
+        pubkey: keyPair.publicKey,
+        network: network,
+    })
+    const p2pkh = bitcoin.payments.p2pkh({
+        pubkey: keyPair.publicKey,
+        network: network,
+    })
+
+
+
+
+
     for (const conf of config) if (conf.addr === address) return conf
     return false
 }
