@@ -3,7 +3,8 @@ const bitcoin = require('bitcoinjs-lib')
 const ecc = require('tiny-secp256k1')
 const ecpair = require('ecpair')
 const ecpairFactory = ecpair.ECPairFactory(ecc)
-const config = require('./config.json');
+const config = require('./config.json')
+const dayjs = require("dayjs")
 
 const Client = require('bitcoin-core');
 const client = new Client({
@@ -16,48 +17,51 @@ const client = new Client({
 
 let myItems = []
 let rivalItems = []
-let targetItems = []
+let targetItems = new Set([])
 
 
-async function read_data() {
-    let getBlockTemplate = await client.getBlockTemplate({"rules": ["segwit"]})
-    let transactions = getBlockTemplate.transactions
-    console.log("transactions:", transactions.length)
-    for (const transaction of transactions) {
-        //console.log(transaction)
+async function read() {
+    while (1) {
         try {
-            let decode = await client.decodeRawTransaction(transaction.data)
-            console.log(decode)
-            for (const vout of decode.vout) {
-                //console.log(vout.scriptPubKey.addresses)
-                if (vout.scriptPubKey.addresses !== undefined) {
-                    let foundAddr = equals(vout.scriptPubKey.addresses[0])
-                    if (foundAddr) targetItems.push({transaction: transaction, foundAddr: foundAddr, vout: vout})
+            let blockchainInfo = await client.getBlockchainInfo()
+            let txsMempool = await client.getRawMempool()
+            let date = dayjs(Date.now()).format('DD/MM/YYYY HH:mm');
+            console.log(date, "txs:", txsMempool.length, "block:", blockchainInfo.blocks)
+
+            for (const txMempool of txsMempool) {
+                //console.log(transaction)
+                let rawTx = await client.getRawTransaction(txMempool)
+                let decode = await client.decodeRawTransaction(rawTx)
+                // console.log(decode)
+                for (const vout of decode.vout) {
+                    //console.log(vout.scriptPubKey.addresses)
+                    if (vout.scriptPubKey.addresses !== undefined) {
+                        let foundAddr = equals(vout.scriptPubKey.addresses[0])
+                        if (foundAddr) targetItems.add({transaction: transaction, foundAddr: foundAddr, vout: vout})
+                    }
                 }
+                for (const vin of decode.vin) {
+                    //console.log(vin)
+                    // if (vout.scriptPubKey.addresses !== undefined) {
+                    //     let foundAddr = equals(vout.scriptPubKey.addresses[0])
+                    //     if (foundAddr) found.push({transaction: transaction, foundAddr: foundAddr, vout: vout})
+                    // }
+                }
+
             }
-            for (const vin of decode.vin) {
-                console.log(vin)
-                // if (vout.scriptPubKey.addresses !== undefined) {
-                //     let foundAddr = equals(vout.scriptPubKey.addresses[0])
-                //     if (foundAddr) found.push({transaction: transaction, foundAddr: foundAddr, vout: vout})
-                // }
+            if (targetItems.length > 0) {
+                let blockStats = await client.getBlockStats(blockchainInfo.blocks)
+                for (const item of targetItems) {
+                    item.minfeerate = blockStats.minfeerate
+                    createFirst(item)
+                }
+            } else {
+                myItems = []
+                rivalItems = []
             }
         } catch (e) {
-            console.log(e)
+            console.log(e.error)
         }
-    }
-    if (targetItems.length > 0) {
-        let blockchainInfo = await client.getBlockchainInfo()
-        let blockStats = await client.getBlockStats(blockchainInfo.blocks)
-
-
-        for (const item of targetItems) {
-            item.minfeerate = blockStats.minfeerate
-            createFirst(item)
-        }
-    } else {
-        myItems = []
-        rivalItems = []
     }
 }
 
@@ -111,8 +115,7 @@ function createFirst(item) {
 
 }
 
-
-read_data().then(r => true)
+read().then(r => console.log(r))
 
 
 // let asd = await client.getTransactionByHash('b4dd08f32be15d96b7166fd77afd18aece7480f72af6c9c7f9c5cbeb01e686fe', { extension: 'json', summary: false });
