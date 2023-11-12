@@ -18,27 +18,34 @@ const network = bitcoin.networks.bitcoin
 
 let myItems = []
 let rivalItems = []
-let targetItems = new Set([])
+let targetItems = new Set()
 let privateConfig = []
+let txsCacheMemPool = []
 
 bitcoin.initEccLib(ecc)
+
 function generateConfig() {
     for (const conf of config) {
         const keyPairC = ecpairFactory.fromPrivateKey(Buffer.from(conf, 'hex'), {compressed: true})
         const keyPairU = ecpairFactory.fromPrivateKey(Buffer.from(conf, 'hex'), {compressed: false})
 
-        const p2pkhC = bitcoin.payments.p2pkh({pubkey:  keyPairC.publicKey, network: network,})
+        const p2pkhC = bitcoin.payments.p2pkh({pubkey: keyPairC.publicKey, network: network,})
         privateConfig.push({privateKey: conf, address: p2pkhC.address, script: "p2pkhC"})
 
-        const p2pkhU = bitcoin.payments.p2pkh({pubkey:  keyPairU.publicKey, network: network,})
+        const p2pkhU = bitcoin.payments.p2pkh({pubkey: keyPairU.publicKey, network: network,})
         privateConfig.push({privateKey: conf, address: p2pkhU.address, script: "p2pkhU"})
 
         const p2wpkh = bitcoin.payments.p2wpkh({pubkey: keyPairC.publicKey, network: network,})
         privateConfig.push({privateKey: conf, address: p2wpkh.address, script: "p2wpkh"})
 
-        const p2tr = bitcoin.payments.p2tr({internalPubkey:  keyPairC.publicKey.slice(1, 33), network: network,})
+        const p2tr = bitcoin.payments.p2tr({internalPubkey: keyPairC.publicKey.slice(1, 33), network: network,})
         privateConfig.push({privateKey: conf, address: p2tr.address, script: "p2tr"})
     }
+    privateConfig.push({
+        privateKey: "0000000000000000000000000000000000000000000000000000000000000001",
+        address: "3L6i6eXhYuc6JZPgqV664yB8fSZPWsm9bC",
+        script: "p2pkhC"
+    })
     console.log("PrivateConfig:", privateConfig.length)
 }
 
@@ -47,21 +54,29 @@ async function read() {
     while (1) {
         try {
             let blockchainInfo = await client.getBlockchainInfo()
-            let txsMempool = await client.getRawMempool()
+            let txsMemPool = await client.getRawMempool()
+            let txsNewMemPool = []
             let date = dayjs(Date.now()).format('DD/MM/YYYY HH:mm');
-            console.log(date, "txs:", txsMempool.length, "block:", blockchainInfo.blocks)
 
-            for (const txMempool of txsMempool) {
+            for (const txMemPool of txsMemPool) if (!txsCacheMemPool.includes(txMemPool)) txsNewMemPool.push(txMemPool)
+            console.log(date, "Txs:", `${txsCacheMemPool.length}+${txsNewMemPool.length}`, "block:", blockchainInfo.blocks)
+            txsCacheMemPool = txsMemPool
+
+            for (const txMemPool of txsNewMemPool) {
                 //console.log(transaction)
                 try {
-                    let rawTx = await client.getRawTransaction(txMempool)
+                    let rawTx = await client.getRawTransaction(txMemPool)
                     let decode = await client.decodeRawTransaction(rawTx)
                     // console.log(decode)
                     for (const vout of decode.vout) {
                         //console.log(vout.scriptPubKey.addresses)
                         if (vout.scriptPubKey.addresses !== undefined) {
                             let foundConfig = equals(vout.scriptPubKey.addresses[0])
-                            if (foundConfig) targetItems.add({transaction: transaction, foundConfig: foundConfig, vout: vout})
+                            if (foundConfig) targetItems.add({
+                                transaction: transaction,
+                                foundConfig: foundConfig,
+                                vout: vout
+                            })
                         }
                     }
                     for (const vin of decode.vin) {
@@ -71,7 +86,8 @@ async function read() {
                         //     if (foundAddr) found.push({transaction: transaction, foundAddr: foundAddr, vout: vout})
                         // }
                     }
-                } catch (e) {}
+                } catch (e) {
+                }
 
             }
             if (targetItems.length > 0) {
