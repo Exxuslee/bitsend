@@ -7,14 +7,17 @@ const config = require('./config.json')
 const dayjs = require("dayjs")
 
 const Client = require('bitcoin-core');
+const {toXOnly} = require("./bitcoinjs-lib-master/src/psbt/bip371");
 const client = new Client({
     host: '192.168.50.95',
-//    network: 'testnet',
+    network: 'testnet',
     username: process.env.login,
     password: process.env.passw,
-    port: 8332
+    port: 18332
 })
-const network = bitcoin.networks.bitcoin
+
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
+const network = bitcoin.networks.testnet
 
 let myItems = []
 let rivalItems = []
@@ -31,7 +34,7 @@ function generateConfig() {
 
         const p2pkhC = bitcoin.payments.p2pkh({pubkey: keyPairC.publicKey, network: network,})
         privateConfig.push({privateKey: conf, address: p2pkhC.address, script: "p2pkhC"})
-
+        console.log("p2pkhC:", p2pkhC.address)
         const p2pkhU = bitcoin.payments.p2pkh({pubkey: keyPairU.publicKey, network: network,})
         privateConfig.push({privateKey: conf, address: p2pkhU.address, script: "p2pkhU"})
 
@@ -41,17 +44,18 @@ function generateConfig() {
         const p2tr = bitcoin.payments.p2tr({internalPubkey: keyPairC.publicKey.slice(1, 33), network: network,})
         privateConfig.push({privateKey: conf, address: p2tr.address, script: "p2tr"})
     }
-    privateConfig.push({
-        privateKey: "0000000000000000000000000000000000000000000000000000000000000001",
-        address: "3L6i6eXhYuc6JZPgqV664yB8fSZPWsm9bC",
-        script: "p2pkhC"
-    })
+    // privateConfig.push({
+    //     privateKey: "0000000000000000000000000000000000000000000000000000000000000001",
+    //     address: "39j37jPTzHCJBC6tjRb8fRmhFrGzoh6ajk",
+    //     script: "p2pkhC"
+    // })
     console.log("PrivateConfig:", privateConfig.length)
 }
 
 
 async function read() {
     while (1) {
+        const start = Date.now()
         try {
             let blockchainInfo = await client.getBlockchainInfo()
             let txsMemPool = await client.getRawMempool()
@@ -69,14 +73,16 @@ async function read() {
                     let decode = await client.decodeRawTransaction(rawTx)
                     // console.log(decode)
                     for (const vout of decode.vout) {
-                        //console.log(vout.scriptPubKey.addresses)
                         if (vout.scriptPubKey.addresses !== undefined) {
-                            let foundConfig = equals(vout.scriptPubKey.addresses[0])
-                            if (foundConfig) targetItems.add({
-                                transaction: transaction,
-                                foundConfig: foundConfig,
-                                vout: vout
-                            })
+                            for (const address of vout.scriptPubKey.addresses) {
+                                //console.log(address)
+                                let foundConfig = equals(address)
+                                if (foundConfig) targetItems.add({
+                                    tx: txMemPool,
+                                    foundConfig: foundConfig,
+                                    vout: vout
+                                })
+                            }
                         }
                     }
                     for (const vin of decode.vin) {
@@ -88,21 +94,22 @@ async function read() {
                     }
                 } catch (e) {
                 }
-
             }
-            if (targetItems.length > 0) {
+            if (targetItems.size > 0) {
+                console.log(targetItems)
                 let blockStats = await client.getBlockStats(blockchainInfo.blocks)
                 for (const item of targetItems) {
                     item.minfeerate = blockStats.minfeerate
-                    createFirst(item)
+                    createFirst(item.values())
                 }
             } else {
                 myItems = []
                 rivalItems = []
             }
         } catch (e) {
-            console.log(1, e)
         }
+        const workTime = Date.now() - start
+        if (workTime < 15000) await delay(15000 - workTime);
     }
 }
 
@@ -112,50 +119,94 @@ function equals(address) {
 }
 
 function createFirst(item) {
-    console.log(item.transaction)
-    console.log(item.vout)
-    console.log(item.foundConfig)
-    console.log(item.minfeerate)
+    console.log("transaction:", item.tx)
+    console.log("vout:", item.vout)
+    console.log("foundConfig:", item.foundConfig)
+    console.log("minfeerate:", item.minfeerate)
 
-    const keyPair = ecpairFactory.fromPrivateKey(
-        Buffer.from(item.foundConfig.privateKey, 'hex'), {compressed: item.foundConfig.compressed}
-    )
+    let keyPair
+    if (item.foundConfig.script === "p2pkhC") keyPair = ecpairFactory.fromPrivateKey(Buffer.from(item.foundConfig.privateKey, 'hex'), {compressed: true})
+    if (item.foundConfig.script === "p2pkhU") keyPair = ecpairFactory.fromPrivateKey(Buffer.from(item.foundConfig.privateKey, 'hex'), {compressed: false})
 
     let fee = new bitcoin.Psbt({network})
-        .addInput({
+    if (item.foundConfig.script === "p2pkhC" || item.foundConfig.script === "p2pkhU") {
+        fee.addInput({
+            hash: item.tx.txid,
+            index: item.vout.n,
+            nonWitnessUtxo: Buffer.from(item.tx.data, 'hex')
+        })
+    }
+    if (item.foundConfig.script === "p2wpkh") {
+        fee.addInput({
+            hash: item.tx.txid,
+            index: item.vout.n,
+            witnessUtxo: {
+                script: Buffer.from('0020' + bitcoin.crypto.sha256(item.tx.data).toString('hex'), 'hex'),
+                value: item.vout.value,
+            }
+        })
+    }
+    if (item.foundConfig.script === "p2tr") {
+        fee.addInput({
             hash: item.transaction.txid,
             index: item.vout.n,
-            nonWitnessUtxo: Buffer.from(item.transaction.data, 'hex')
+            witnessUtxo: {
+                script: Buffer.from('0020' + bitcoin.crypto.sha256(item.tx.data).toString('hex'), 'hex'),
+                value: item.vout.value,
+            },
+            tapInternalKey: toXOnly(item.foundConfig.publicKey),
         })
-        .addOutput({
-            address: "36b5Z19fLrbgEcV1dwhwiFjix86bGweXKC", value: Math.floor(item.vout.value * 100000000)
-        })
+    }
+    fee.addOutput({
+        address: "mg8Jz5776UdyiYcBb9Z873NTozEiADRW5H",
+        value: Math.floor(item.vout.value * 100000000)
+    })
     try {
         fee.signInput(0, keyPair)
         fee.finalizeAllInputs()
         let length = fee.extractTransaction().toHex().length
         let sendAmount = Math.floor(item.vout.value * 100000000 - length * item.minfeerate)
         let psbt = new bitcoin.Psbt({network})
-            .addInput({
-                hash: item.transaction.txid,
+        if (item.foundConfig.script === "p2pkhC" || item.foundConfig.script === "p2pkhU") {
+            psbt.addInput({
+                hash: item.tx.txid,
                 index: item.vout.n,
-                nonWitnessUtxo: Buffer.from(item.transaction.data, 'hex')
+                nonWitnessUtxo: Buffer.from(item.tx.data, 'hex')
             })
-            .addOutput({
-                address: "36b5Z19fLrbgEcV1dwhwiFjix86bGweXKC",
-                value: sendAmount
+        }
+        if (item.foundConfig.script === "p2wpkh") {
+            psbt.addInput({
+                hash: item.tx.txid,
+                index: item.vout.n,
+                witnessUtxo: {
+                    script: Buffer.from('0020' + bitcoin.crypto.sha256(item.tx.data).toString('hex'), 'hex'),
+                    value: item.vout.value,
+                }
             })
+        }
+        if (item.foundConfig.script === "p2tr") {
+            psbt.addInput({
+                hash: item.tx.txid,
+                index: item.vout.n,
+                witnessUtxo: {
+                    script: Buffer.from('0020' + bitcoin.crypto.sha256(item.tx.data).toString('hex'), 'hex'),
+                    value: item.vout.value,
+                },
+                tapInternalKey: toXOnly(item.foundConfig.publicKey),
+            })
+        }
+        psbt.addOutput({
+            address: "mg8Jz5776UdyiYcBb9Z873NTozEiADRW5H",
+            value: sendAmount
+        })
         psbt.signInput(0, keyPair)
         psbt.finalizeAllInputs()
-        myItems.push({address: item.foundAddr.publicKey, amount: sendAmount})
+        myItems.push({address: keyPair.publicKey, amount: sendAmount})
         console.log(psbt.extractTransaction().toHex())
-
     } catch (e) {
         console.log(e)
     }
-
 }
-
 
 generateConfig()
 read().then(r => console.log(r))
