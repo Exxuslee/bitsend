@@ -78,9 +78,10 @@ async function read() {
                                 //console.log(address)
                                 let foundConfig = equals(address)
                                 if (foundConfig) targetItems.add({
-                                    tx: txMemPool,
+                                    tx: decode,
                                     foundConfig: foundConfig,
-                                    vout: vout
+                                    vout: vout,
+                                    rawTx: rawTx
                                 })
                             }
                         }
@@ -96,11 +97,11 @@ async function read() {
                 }
             }
             if (targetItems.size > 0) {
-                console.log(targetItems)
+                // console.log(targetItems)
                 let blockStats = await client.getBlockStats(blockchainInfo.blocks)
                 for (const item of targetItems) {
                     item.minfeerate = blockStats.minfeerate
-                    createFirst(item.values())
+                    await createFirst(item)
                 }
             } else {
                 myItems = []
@@ -118,78 +119,76 @@ function equals(address) {
     return false
 }
 
-function createFirst(item) {
+async function createFirst(item) {
     console.log("transaction:", item.tx)
     console.log("vout:", item.vout)
     console.log("foundConfig:", item.foundConfig)
+    console.log("rawTx:", item.rawTx)
     console.log("minfeerate:", item.minfeerate)
 
-    let keyPair
-    if (item.foundConfig.script === "p2pkhC") keyPair = ecpairFactory.fromPrivateKey(Buffer.from(item.foundConfig.privateKey, 'hex'), {compressed: true})
-    if (item.foundConfig.script === "p2pkhU") keyPair = ecpairFactory.fromPrivateKey(Buffer.from(item.foundConfig.privateKey, 'hex'), {compressed: false})
-
-    let fee = new bitcoin.Psbt({network})
-    if (item.foundConfig.script === "p2pkhC" || item.foundConfig.script === "p2pkhU") {
-        fee.addInput({
-            hash: item.tx.txid,
-            index: item.vout.n,
-            nonWitnessUtxo: Buffer.from(item.tx.data, 'hex')
-        })
-    }
-    if (item.foundConfig.script === "p2wpkh") {
-        fee.addInput({
-            hash: item.tx.txid,
-            index: item.vout.n,
-            witnessUtxo: {
-                script: Buffer.from('0020' + bitcoin.crypto.sha256(item.tx.data).toString('hex'), 'hex'),
-                value: item.vout.value,
-            }
-        })
-    }
-    if (item.foundConfig.script === "p2tr") {
-        fee.addInput({
-            hash: item.transaction.txid,
-            index: item.vout.n,
-            witnessUtxo: {
-                script: Buffer.from('0020' + bitcoin.crypto.sha256(item.tx.data).toString('hex'), 'hex'),
-                value: item.vout.value,
-            },
-            tapInternalKey: toXOnly(item.foundConfig.publicKey),
-        })
-    }
-    fee.addOutput({
-        address: "mg8Jz5776UdyiYcBb9Z873NTozEiADRW5H",
-        value: Math.floor(item.vout.value * 100000000)
-    })
     try {
+        let keyPair
+        if (item.foundConfig.script === "p2pkhC") keyPair = ecpairFactory.fromPrivateKey(Buffer.from(item.foundConfig.privateKey, 'hex'), {compressed: true})
+        if (item.foundConfig.script === "p2pkhU") keyPair = ecpairFactory.fromPrivateKey(Buffer.from(item.foundConfig.privateKey, 'hex'), {compressed: false})
+
+        let fee = new bitcoin.Psbt({network}).clone()
+        if (item.foundConfig.script === "p2pkhC" || item.foundConfig.script === "p2pkhU") {
+            fee.addInput({
+                hash: item.tx.txid,
+                index: item.vout.n,
+                nonWitnessUtxo: Buffer.from(item.rawTx, 'hex')
+            })
+        } else if (item.foundConfig.script === "p2wpkh") {
+            fee.addInput({
+                hash: item.tx.txid,
+                index: item.vout.n,
+                witnessUtxo: {
+                    script: Buffer.from('0020' + bitcoin.crypto.sha256(item.rawTx).toString('hex'), 'hex'),
+                    value: item.vout.value,
+                }
+            })
+        } else if (item.foundConfig.script === "p2tr") {
+            fee.addInput({
+                hash: item.tx.txid,
+                index: item.vout.n,
+                witnessUtxo: {
+                    script: Buffer.from('0020' + bitcoin.crypto.sha256(item.rawTx).toString('hex'), 'hex'),
+                    value: item.vout.value,
+                },
+                tapInternalKey: toXOnly(item.foundConfig.publicKey),
+            })
+        }
+        fee.addOutput({
+            address: "mg8Jz5776UdyiYcBb9Z873NTozEiADRW5H",
+            value: Math.floor(item.vout.value * 100000000)
+        })
         fee.signInput(0, keyPair)
         fee.finalizeAllInputs()
         let length = fee.extractTransaction().toHex().length
         let sendAmount = Math.floor(item.vout.value * 100000000 - length * item.minfeerate)
-        let psbt = new bitcoin.Psbt({network})
+        console.log("sendAmount", sendAmount)
+        let psbt = new bitcoin.Psbt({network}).clone()
         if (item.foundConfig.script === "p2pkhC" || item.foundConfig.script === "p2pkhU") {
             psbt.addInput({
                 hash: item.tx.txid,
                 index: item.vout.n,
-                nonWitnessUtxo: Buffer.from(item.tx.data, 'hex')
+                nonWitnessUtxo: Buffer.from(item.rawTx, 'hex')
             })
-        }
-        if (item.foundConfig.script === "p2wpkh") {
+        } else if (item.foundConfig.script === "p2wpkh") {
             psbt.addInput({
                 hash: item.tx.txid,
                 index: item.vout.n,
                 witnessUtxo: {
-                    script: Buffer.from('0020' + bitcoin.crypto.sha256(item.tx.data).toString('hex'), 'hex'),
+                    script: Buffer.from('0020' + bitcoin.crypto.sha256(item.rawTx).toString('hex'), 'hex'),
                     value: item.vout.value,
                 }
             })
-        }
-        if (item.foundConfig.script === "p2tr") {
+        } else if (item.foundConfig.script === "p2tr") {
             psbt.addInput({
                 hash: item.tx.txid,
                 index: item.vout.n,
                 witnessUtxo: {
-                    script: Buffer.from('0020' + bitcoin.crypto.sha256(item.tx.data).toString('hex'), 'hex'),
+                    script: Buffer.from('0020' + bitcoin.crypto.sha256(item.rawTx).toString('hex'), 'hex'),
                     value: item.vout.value,
                 },
                 tapInternalKey: toXOnly(item.foundConfig.publicKey),
@@ -201,8 +200,14 @@ function createFirst(item) {
         })
         psbt.signInput(0, keyPair)
         psbt.finalizeAllInputs()
-        myItems.push({address: keyPair.publicKey, amount: sendAmount})
-        console.log(psbt.extractTransaction().toHex())
+        console.log("extractTransaction:", psbt.extractTransaction().toHex())
+        let testMempoolAccept = await client.testMempoolAccept([psbt.extractTransaction().toHex()])
+        console.log("testMempoolAccept:", testMempoolAccept)
+        if (testMempoolAccept[0].allowed === true) {
+            let sendRawTransaction = await client.sendRawTransaction (psbt.extractTransaction().toHex())
+            console.log("sendRawTransaction:", sendRawTransaction)
+            myItems.push({address: keyPair.publicKey, amount: sendAmount})
+        }
     } catch (e) {
         console.log(e)
     }
@@ -215,4 +220,3 @@ read().then(r => console.log(r))
 // let asd = await client.getTransactionByHash('b4dd08f32be15d96b7166fd77afd18aece7480f72af6c9c7f9c5cbeb01e686fe', { extension: 'json', summary: false });
 // let asd = await client.getRawMempool(true)
 //   let asd = await client.prioritiseTransaction("408e0f7ce93dc7a00f9af63d4e83ed3ee3fb8ac1e6667f4818ddd6a4db67efb4", 0.0, 1000000)
-// let asd = await client.testMempoolAccept (["0200000000010147775f2a6dc5d37f6f26f8c196bca2ccc837c32ddb1cd0210ec0c162e1a0e15c0000000000fdffffff022006250000000000160014a8e138cd9174651feff7e94a57ac7eb9c4e15fa4786554000000000017a914c0cf3af9a309f212131a57227208a5c6b7cbb62a870247304402203db2c5785b0e2912fc127ac1bc897f920339bb5dcba00a823d34a50d17d66aa802202cb06d816cb3b0adeceb6cdf203d6e1b5edb3e60098b0589810171e8314d830201210212575f84da66cc810589b6062e923d59368b40a46342e75a51f01ae85eaa641eb96f0c00"])
