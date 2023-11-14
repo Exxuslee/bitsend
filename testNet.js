@@ -6,6 +6,7 @@ const ecpairFactory = ecpair.ECPairFactory(ecc)
 const config = require('./config.json')
 const dayjs = require("dayjs")
 
+const HOME_TX = "tb1q6z36pfnefqq8k3ghe8wxmnqxf5t5kvtccx03gd"
 const Client = require('bitcoin-core');
 const {toXOnly} = require("./bitcoinjs-lib-master/src/psbt/bip371");
 const client = new Client({
@@ -19,9 +20,7 @@ const client = new Client({
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
 const network = bitcoin.networks.testnet
 
-let myItems = []
-let rivalItems = []
-let targetItems = new Set()
+let items = new Map()
 let privateConfig = []
 let txsCacheMemPool = []
 
@@ -55,61 +54,85 @@ function generateConfig() {
 
 async function read() {
     while (1) {
-        const start = Date.now()
+        let start = Date.now()
         try {
             let blockchainInfo = await client.getBlockchainInfo()
+            let blockStats = await client.getBlockStats(blockchainInfo.blocks)
             let txsMemPool = await client.getRawMempool()
             let txsNewMemPool = []
             let date = dayjs(Date.now()).format('DD/MM/YYYY HH:mm');
 
-            for (const txMemPool of txsMemPool) if (!txsCacheMemPool.includes(txMemPool)) txsNewMemPool.push(txMemPool)
+            for (let txMemPool of txsMemPool) if (!txsCacheMemPool.includes(txMemPool)) txsNewMemPool.push(txMemPool)
             console.log(date, "Txs:", `${txsCacheMemPool.length}+${txsNewMemPool.length}`, "block:", blockchainInfo.blocks)
             txsCacheMemPool = txsMemPool
 
-            for (const txMemPool of txsNewMemPool) {
-                //console.log(transaction)
+            for (let txMemPool of txsNewMemPool) {
                 try {
                     let rawTx = await client.getRawTransaction(txMemPool)
                     let decode = await client.decodeRawTransaction(rawTx)
-                    // console.log(decode)
-                    for (const vout of decode.vout) {
+                    //console.log("decode:",JSON.stringify(decode))
+                    for (let vout of decode.vout) {
+                        //console.log("vout:",JSON.stringify(vout))
                         if (vout.scriptPubKey.addresses !== undefined) {
-                            for (const address of vout.scriptPubKey.addresses) {
+                            for (let address of vout.scriptPubKey.addresses) {
                                 //console.log(address)
                                 let foundConfig = equals(address)
-                                if (foundConfig) targetItems.add({
-                                    tx: decode,
-                                    foundConfig: foundConfig,
-                                    vout: vout,
-                                    rawTx: rawTx
-                                })
+                                if (foundConfig && !items.has(decode.txid)) {
+                                    items.set(decode.txid, {
+                                        tx: decode,
+                                        foundConfig: foundConfig,
+                                        vout: vout,
+                                        rawTx: rawTx,
+                                        minfeerate: blockStats.minfeerate,
+                                        rival: false,
+                                        my: false,
+                                        myAmount: 0
+                                    })
+                                }
                             }
                         }
                     }
-                    for (const vin of decode.vin) {
-                        //console.log(vin)
-                        // if (vout.scriptPubKey.addresses !== undefined) {
-                        //     let foundAddr = equals(vout.scriptPubKey.addresses[0])
-                        //     if (foundAddr) found.push({transaction: transaction, foundAddr: foundAddr, vout: vout})
-                        // }
-                    }
                 } catch (e) {
+                    console.log("error:", JSON.stringify(e))
                 }
             }
-            if (targetItems.size > 0) {
-                // console.log(targetItems)
-                let blockStats = await client.getBlockStats(blockchainInfo.blocks)
-                for (const item of targetItems) {
-                    item.minfeerate = blockStats.minfeerate
-                    await createFirst(item)
+            if (items.size > 0) {
+                for (let txMemPool of txsNewMemPool) {
+                    try {
+                        //console.log("txMemPool:", JSON.stringify(txMemPool))
+                        let rawTx = await client.getRawTransaction(txMemPool)
+                        let decode = await client.decodeRawTransaction(rawTx)
+                        //console.log("decode:", JSON.stringify(decode))
+                        for (let vin of decode.vin) {
+                            //console.log(vin)
+                            //console.log("txid:", vin.txid)
+                            if (items.has(vin.txid) && decode.vout[0].scriptPubKey.addresses[0] !== HOME_TX) {
+                                items.set(vin.txid, {rival: true})
+                            }
+                            if (items.has(vin.txid) && decode.vout[0].scriptPubKey.addresses[0] === HOME_TX) {
+                                items.set(vin.txid, {my: true})
+                            }
+                        }
+                    } catch (e) {
+                    }
                 }
-            } else {
-                myItems = []
-                rivalItems = []
+            }
+
+            for (const key of items.keys()) {
+                console.log("key:", key)
+                if (!txsMemPool.includes(key)) items.delete(key)
+            }
+
+            for (const item of items.values()) {
+                if (!item.rival && !item.my) await createFirst(item)
+                if (item.rival && !item.my) await createRival(item)
+                if (item.rival && item.my) await createRivalMy(item)
+                if (!item.rival && item.my) console.log("0 myTx only")
             }
         } catch (e) {
+            console.log("error:", JSON.stringify(e))
         }
-        const workTime = Date.now() - start
+        let workTime = Date.now() - start
         if (workTime < 15000) await delay(15000 - workTime);
     }
 }
@@ -120,11 +143,12 @@ function equals(address) {
 }
 
 async function createFirst(item) {
-    console.log("transaction:", item.tx)
-    console.log("vout:", item.vout)
-    console.log("foundConfig:", item.foundConfig)
-    console.log("rawTx:", item.rawTx)
-    console.log("minfeerate:", item.minfeerate)
+    console.log("0 createFirst")
+    console.log("1 tx:", JSON.stringify(item.tx))
+    console.log("2 vout:", JSON.stringify(item.vout))
+    console.log("3 foundConfig:", JSON.stringify(item.foundConfig))
+    console.log("4 rawTx:", item.rawTx)
+    console.log("5 minfeerate:", item.minfeerate)
 
     try {
         let keyPair
@@ -159,14 +183,14 @@ async function createFirst(item) {
             })
         }
         fee.addOutput({
-            address: "mg8Jz5776UdyiYcBb9Z873NTozEiADRW5H",
+            address: HOME_TX,
             value: Math.floor(item.vout.value * 100000000)
         })
         fee.signInput(0, keyPair)
         fee.finalizeAllInputs()
         let length = fee.extractTransaction().toHex().length
         let sendAmount = Math.floor(item.vout.value * 100000000 - length * item.minfeerate)
-        console.log("sendAmount", sendAmount)
+        console.log("6 sendAmount", sendAmount)
         let psbt = new bitcoin.Psbt({network}).clone()
         if (item.foundConfig.script === "p2pkhC" || item.foundConfig.script === "p2pkhU") {
             psbt.addInput({
@@ -195,22 +219,40 @@ async function createFirst(item) {
             })
         }
         psbt.addOutput({
-            address: "mg8Jz5776UdyiYcBb9Z873NTozEiADRW5H",
+            address: HOME_TX,
             value: sendAmount
         })
         psbt.signInput(0, keyPair)
         psbt.finalizeAllInputs()
-        console.log("extractTransaction:", psbt.extractTransaction().toHex())
+        console.log("7 extractTransaction:", psbt.extractTransaction().toHex())
         let testMempoolAccept = await client.testMempoolAccept([psbt.extractTransaction().toHex()])
-        console.log("testMempoolAccept:", testMempoolAccept)
+        console.log("8 testMempoolAccept:", JSON.stringify(testMempoolAccept))
         if (testMempoolAccept[0].allowed === true) {
-            let sendRawTransaction = await client.sendRawTransaction (psbt.extractTransaction().toHex())
-            console.log("sendRawTransaction:", sendRawTransaction)
-            myItems.push({address: keyPair.publicKey, amount: sendAmount})
+            let sendRawTransaction = await client.sendRawTransaction(psbt.extractTransaction().toHex())
+            item.myAmount = sendAmount
+            console.log("9 sendRawTransaction:", "" + sendRawTransaction)
         }
     } catch (e) {
-        console.log(e)
+        console.log("error:", JSON.stringify(e))
     }
+}
+
+async function createRival(item) {
+    console.log("0 createRival")
+    console.log("1 tx:", JSON.stringify(item.tx))
+    console.log("2 vout:", JSON.stringify(item.vout))
+    console.log("3 foundConfig:", JSON.stringify(item.foundConfig))
+    console.log("4 rawTx:", item.rawTx)
+    console.log("5 minfeerate:", item.minfeerate)
+}
+
+async function createRivalMy(item) {
+    console.log("0 createRivalMy")
+    console.log("1 tx:", JSON.stringify(item.tx))
+    console.log("2 vout:", JSON.stringify(item.vout))
+    console.log("3 foundConfig:", JSON.stringify(item.foundConfig))
+    console.log("4 rawTx:", item.rawTx)
+    console.log("5 minfeerate:", item.minfeerate)
 }
 
 generateConfig()
