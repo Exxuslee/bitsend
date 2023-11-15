@@ -72,7 +72,7 @@ async function read() {
                     let decode = await client.decodeRawTransaction(rawTx)
                     //console.log("decode:",JSON.stringify(decode))
                     for (let vout of decode.vout) {
-                        //console.log("vout:",JSON.stringify(vout))
+                        //console.log("vout:", JSON.stringify(vout))
                         if (vout.scriptPubKey.addresses !== undefined) {
                             for (let address of vout.scriptPubKey.addresses) {
                                 //console.log(address)
@@ -85,6 +85,7 @@ async function read() {
                                         rawTx: rawTx,
                                         minfeerate: blockStats.minfeerate,
                                         rival: false,
+                                        rivalAmount: 0,
                                         my: false,
                                         myAmount: 0
                                     })
@@ -107,10 +108,16 @@ async function read() {
                             //console.log(vin)
                             //console.log("txid:", vin.txid)
                             if (items.has(vin.txid) && decode.vout[0].scriptPubKey.addresses[0] !== HOME_TX) {
-                                items.set(vin.txid, {rival: true})
+                                let rivalAmount = 0
+                                for (let vout of decode.vout) rivalAmount = rivalAmount + vout.value
+                                if (rivalAmount < items.get(decode.txid).rivalAmount) rivalAmount = items.get(decode.txid).rivalAmount
+                                items.set(vin.txid, {rival: true, rivalAmount: rivalAmount})
                             }
                             if (items.has(vin.txid) && decode.vout[0].scriptPubKey.addresses[0] === HOME_TX) {
-                                items.set(vin.txid, {my: true})
+                                let myAmount = 0
+                                for (let vout of decode.vout) myAmount = myAmount + vout.value
+                                if (myAmount < items.get(decode.txid).myAmount) myAmount = items.get(decode.txid).myAmount
+                                items.set(vin.txid, {my: true, myAmount: myAmount})
                             }
                         }
                     } catch (e) {
@@ -119,8 +126,10 @@ async function read() {
             }
 
             for (const key of items.keys()) {
-                console.log("key:", key)
-                if (!txsMemPool.includes(key)) items.delete(key)
+                if (!txsMemPool.includes(key)) {
+                    console.log("del key:", key)
+                    items.delete(key)
+                }
             }
 
             for (const item of items.values()) {
@@ -155,7 +164,7 @@ async function createFirst(item) {
         if (item.foundConfig.script === "p2pkhC") keyPair = ecpairFactory.fromPrivateKey(Buffer.from(item.foundConfig.privateKey, 'hex'), {compressed: true})
         if (item.foundConfig.script === "p2pkhU") keyPair = ecpairFactory.fromPrivateKey(Buffer.from(item.foundConfig.privateKey, 'hex'), {compressed: false})
 
-        let fee = new bitcoin.Psbt({network}).clone()
+        let fee = new bitcoin.Psbt({network})
         if (item.foundConfig.script === "p2pkhC" || item.foundConfig.script === "p2pkhU") {
             fee.addInput({
                 hash: item.tx.txid,
@@ -190,8 +199,47 @@ async function createFirst(item) {
         fee.finalizeAllInputs()
         let length = fee.extractTransaction().toHex().length
         let sendAmount = Math.floor(item.vout.value * 100000000 - length * item.minfeerate)
+        await send(item, sendAmount)
+    } catch (e) {
+        console.log("error:", JSON.stringify(e))
+    }
+}
+
+async function createRival(item) {
+    console.log("0 createRival")
+    console.log("1 tx:", JSON.stringify(item.tx))
+    console.log("2 vout:", JSON.stringify(item.vout))
+    console.log("3 foundConfig:", JSON.stringify(item.foundConfig))
+    console.log("4 rawTx:", item.rawTx)
+    console.log("5 minfeerate:", item.minfeerate)
+    let sendAmount = Math.floor((item.rivalAmount - 0.000001) * 100000000)
+    if (sendAmount > 0) await send(item, sendAmount)
+    else console.log("sendAmount error:", sendAmount)
+}
+
+async function createRivalMy(item) {
+    console.log("0 createRivalMy")
+    console.log("1 tx:", JSON.stringify(item.tx))
+    console.log("2 vout:", JSON.stringify(item.vout))
+    console.log("3 foundConfig:", JSON.stringify(item.foundConfig))
+    console.log("4 rawTx:", item.rawTx)
+    console.log("5 minfeerate:", item.minfeerate)
+
+    if (item.myAmount >= item.rivalAmount) {
+        let sendAmount = Math.floor((item.rivalAmount - 0.000001) * 100000000)
+        if (sendAmount > 0) await send(item, sendAmount)
+        else console.log("sendAmount error:", sendAmount)
+    } else console.log(item.vout.value, item.myAmount, ">=", item.rivalAmount)
+}
+
+async function send(item, sendAmount) {
+    try {
+        let keyPair
+        if (item.foundConfig.script === "p2pkhC") keyPair = ecpairFactory.fromPrivateKey(Buffer.from(item.foundConfig.privateKey, 'hex'), {compressed: true})
+        if (item.foundConfig.script === "p2pkhU") keyPair = ecpairFactory.fromPrivateKey(Buffer.from(item.foundConfig.privateKey, 'hex'), {compressed: false})
+
         console.log("6 sendAmount", sendAmount)
-        let psbt = new bitcoin.Psbt({network}).clone()
+        let psbt = new bitcoin.Psbt({network})
         if (item.foundConfig.script === "p2pkhC" || item.foundConfig.script === "p2pkhU") {
             psbt.addInput({
                 hash: item.tx.txid,
@@ -233,26 +281,8 @@ async function createFirst(item) {
             console.log("9 sendRawTransaction:", "" + sendRawTransaction)
         }
     } catch (e) {
-        console.log("error:", JSON.stringify(e))
+        console.log("error send:", JSON.stringify(e))
     }
-}
-
-async function createRival(item) {
-    console.log("0 createRival")
-    console.log("1 tx:", JSON.stringify(item.tx))
-    console.log("2 vout:", JSON.stringify(item.vout))
-    console.log("3 foundConfig:", JSON.stringify(item.foundConfig))
-    console.log("4 rawTx:", item.rawTx)
-    console.log("5 minfeerate:", item.minfeerate)
-}
-
-async function createRivalMy(item) {
-    console.log("0 createRivalMy")
-    console.log("1 tx:", JSON.stringify(item.tx))
-    console.log("2 vout:", JSON.stringify(item.vout))
-    console.log("3 foundConfig:", JSON.stringify(item.foundConfig))
-    console.log("4 rawTx:", item.rawTx)
-    console.log("5 minfeerate:", item.minfeerate)
 }
 
 generateConfig()
