@@ -84,10 +84,6 @@ async function read() {
                                         vout: vout,
                                         rawTx: rawTx,
                                         minfeerate: blockStats.minfeerate,
-                                        rival: false,
-                                        rivalAmount: 0,
-                                        my: false,
-                                        myAmount: 0
                                     })
                                 }
                             }
@@ -98,47 +94,10 @@ async function read() {
                 }
             }
             if (items.size > 0) {
-                for (let txMemPool of txsNewMemPool) {
-                    try {
-                        //console.log("txMemPool:", JSON.stringify(txMemPool))
-                        let rawTx = await client.getRawTransaction(txMemPool)
-                        let decode = await client.decodeRawTransaction(rawTx)
-                        //console.log("decode:", JSON.stringify(decode))
-                        for (let vin of decode.vin) {
-                            //console.log(vin)
-                            //console.log("txid:", vin.txid)
-                            if (items.has(vin.txid) && decode.vout[0].scriptPubKey.addresses[0] !== HOME_TX) {
-                                let rivalAmount = 0
-                                for (let vout of decode.vout) rivalAmount = rivalAmount + vout.value
-                                if (rivalAmount < items.get(decode.txid).rivalAmount) rivalAmount = items.get(decode.txid).rivalAmount
-                                items.set(vin.txid, {rival: true, rivalAmount: rivalAmount})
-                            }
-                            if (items.has(vin.txid) && decode.vout[0].scriptPubKey.addresses[0] === HOME_TX) {
-                                let myAmount = 0
-                                for (let vout of decode.vout) myAmount = myAmount + vout.value
-                                if (myAmount < items.get(decode.txid).myAmount) myAmount = items.get(decode.txid).myAmount
-                                console.log("myAmount:", vin.txid)
-                                items.set(vin.txid, {my: true, myAmount: myAmount})
-                            }
-                        }
-                    } catch (e) {
-                    }
-                }
+                for (const item of items.values()) await createFirst(item)
+                items.clear()
             }
 
-            for (const key of items.keys()) {
-                if (!txsMemPool.includes(key)) {
-                    console.log("del key:", key)
-                    items.delete(key)
-                }
-            }
-
-            for (const item of items.values()) {
-                if (!item.rival && !item.my) await createFirst(item)
-                if (item.rival && !item.my) await createRival(item)
-                if (item.rival && item.my) await createRivalMy(item)
-                if (!item.rival && item.my) console.log("0 myTx only")
-            }
         } catch (e) {
             console.log("error:", JSON.stringify(e))
         }
@@ -206,33 +165,6 @@ async function createFirst(item) {
     }
 }
 
-async function createRival(item) {
-    console.log("0 createRival")
-    console.log("1 tx:", JSON.stringify(item.tx))
-    console.log("2 vout:", JSON.stringify(item.vout))
-    console.log("3 foundConfig:", JSON.stringify(item.foundConfig))
-    console.log("4 rawTx:", item.rawTx)
-    console.log("5 minfeerate:", item.minfeerate)
-    let sendAmount = Math.floor((item.rivalAmount - 0.000001) * 100000000)
-    if (sendAmount > 0) await send(item, sendAmount)
-    else console.log("sendAmount error:", sendAmount)
-}
-
-async function createRivalMy(item) {
-    console.log("0 createRivalMy")
-    console.log("1 tx:", JSON.stringify(item.tx))
-    console.log("2 vout:", JSON.stringify(item.vout))
-    console.log("3 foundConfig:", JSON.stringify(item.foundConfig))
-    console.log("4 rawTx:", item.rawTx)
-    console.log("5 minfeerate:", item.minfeerate)
-
-    if (item.myAmount >= item.rivalAmount) {
-        let sendAmount = Math.floor((item.rivalAmount - 0.000001) * 100000000)
-        if (sendAmount > 0) await send(item, sendAmount)
-        else console.log("sendAmount error:", sendAmount)
-    } else console.log(item.vout.value, item.myAmount, ">=", item.rivalAmount)
-}
-
 async function send(item, sendAmount) {
     try {
         let keyPair
@@ -281,9 +213,6 @@ async function send(item, sendAmount) {
             item.myAmount = sendAmount
             console.log("9 sendRawTransaction:", "" + sendRawTransaction)
         }
-        let sendRawTransaction = await client.sendRawTransaction(psbt.extractTransaction().toHex())
-        item.myAmount = sendAmount
-        console.log("9 sendRawTransaction:", "" + sendRawTransaction)
     } catch (e) {
         console.log("error send:", JSON.stringify(e))
     }
